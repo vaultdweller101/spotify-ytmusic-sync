@@ -1,17 +1,20 @@
 # Spotify <--> YouTube Music Bi-Directional Syncer
 
-A Python tool that performs **two-way synchronization** between Spotify and YouTube Music playlists.
+A Python tool that synchronizes playlists between **Spotify** and **YouTube Music**.
 
-- **Intelligent matching**: Uses fuzzy string matching, title cleaning (strips video tags, remasters, etc.), and duration validation.
-- **Two-way sync (Union)**: Songs on Spotify missing from YouTube Music are added to YouTube Music; songs on YouTube Music missing from Spotify are added to Spotify.
-- **Caching**: Maps matched songs in `sync_cache.json` so repeated runs are fast and don't re-query the APIs unnecessarily.
-- **Dry-run mode**: Allows previewing additions before writing to either playlist.
+> [!NOTE]
+> **No Spotify Premium Required!**
+> In early 2026, Spotify introduced a restriction requiring an active Spotify Premium subscription to register an app in the Spotify Developer Dashboard.
+> To solve this, this script includes a **Free / Zero-API Mode**:
+> - **Spotify to YouTube Music**: Reads your Spotify playlist directly from the public/shareable web embed—**no API keys, no developer account, and no Spotify Premium needed**. All tracks are automatically searched and added to your YouTube Music playlist.
+> - **YouTube Music to Spotify**: If you don't have Premium for the official Web API, the script exports any missing tracks into `spotify_tracks_to_add.txt` with direct search links. You can then add them in Spotify Desktop with a simple `Ctrl + V`.
+> - **Full Two-Way API Mode**: If you (or a friend/family member) *do* have Spotify Premium, you can add Developer API keys to `.env` for 100% automated read/write on both platforms.
 
 ---
 
 ## 1. Quick Start
 
-The virtual environment and dependencies are already installed in:
+The virtual environment and dependencies are already set up in:
 `C:\Users\dngo123\spotify-ytmusic-sync\.venv`
 
 To activate the environment in PowerShell:
@@ -22,63 +25,51 @@ cd C:\Users\dngo123\spotify-ytmusic-sync
 
 ---
 
-## 2. Setup Credentials
+## 2. YouTube Music Setup (Free)
 
-### Step 2.1: Spotify Setup
-1. Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) and log in.
-2. Click **Create App**:
-   - **App Name**: `Music Syncer`
-   - **Redirect URI**: `http://localhost:8888/callback`
-   - **Which API are you planning on using?**: Select `Web API`.
-3. Save the app and go to **Settings** to find your **Client ID** and **Client Secret**.
-4. Run the setup wizard:
-   ```powershell
-   python sync.py setup-spotify
-   ```
-   *This saves the credentials into `.env` and opens your browser once to authorize playlist permissions.*
+YouTube Music editing is 100% free with any standard Google account.
 
-### Step 2.2: YouTube Music Setup
-YouTube Music requires authentication to view and modify your private playlists.
-
-**Recommended Method (Browser Headers):**
-1. Open Chrome, Edge, or Firefox and go to [music.youtube.com](https://music.youtube.com). Make sure you are logged in.
+**Browser Headers Setup (Takes ~30 seconds):**
+1. Open Chrome, Edge, or Firefox and go to [music.youtube.com](https://music.youtube.com) (ensure you are logged in).
 2. Press **F12** to open Developer Tools -> click the **Network** tab.
 3. Click any song or playlist in YouTube Music so requests appear in the Network tab.
-4. Right-click any request to `music.youtube.com` (such as `browse`), select **Copy** -> **Copy request headers** (or Copy as cURL).
+4. Right-click any request to `music.youtube.com` (such as `browse`), select **Copy** -> **Copy request headers** (or *Copy as cURL*).
 5. Run:
    ```powershell
    ytmusicapi browser
    ```
-   Paste the headers into your terminal and press `Enter` (or `Ctrl+Z` / `Enter` to finish). This creates `browser.json`.
+   Paste the headers into the terminal and press Enter. This creates `browser.json`.
 
 ---
 
-## 3. Test Connections
+## 3. Verify Connections
 
-Verify that both services can connect:
+Test your connection status:
 ```powershell
 python sync.py test
 ```
+*(Spotify will show `Connected to Spotify as: Public Scraper Mode` if running without Premium/API keys).*
 
 ---
 
 ## 4. Running the Sync
 
-### Option A: Preview with Dry Run (Safe Test)
+### A. Preview Sync (Dry Run)
+Inspect matches without modifying either playlist:
 ```powershell
-python sync.py sync --spotify "<SPOTIFY_PLAYLIST_URL_OR_ID>" --ytmusic "<YTMUSIC_PLAYLIST_URL_OR_ID>" --dry-run
+python sync.py sync --spotify "<SPOTIFY_PLAYLIST_URL>" --ytmusic "<YTMUSIC_PLAYLIST_URL>" --dry-run
 ```
 
-### Option B: Run Two-Way Synchronization
+### B. Run Synchronization
 ```powershell
-python sync.py sync --spotify "<SPOTIFY_PLAYLIST_URL_OR_ID>" --ytmusic "<YTMUSIC_PLAYLIST_URL_OR_ID>"
+python sync.py sync --spotify "<SPOTIFY_PLAYLIST_URL>" --ytmusic "<YTMUSIC_PLAYLIST_URL>"
 ```
 
-### Option C: Save Default Playlists in `.env`
-You can save your playlist links in `.env`:
+### C. (Optional) Save Default Playlists in `.env`
+Save your playlist links in `.env`:
 ```env
-SPOTIFY_PLAYLIST_ID=https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M
-YTMUSIC_PLAYLIST_ID=https://music.youtube.com/playlist?list=PLrAlghPGeDAl...
+SPOTIFY_PLAYLIST_ID=https://open.spotify.com/playlist/...
+YTMUSIC_PLAYLIST_ID=https://music.youtube.com/playlist?list=...
 ```
 Then simply run:
 ```powershell
@@ -87,13 +78,9 @@ python sync.py sync
 
 ---
 
-## CLI Options
+## Summary of Sync Modes
 
-| Argument | Description | Default |
-|---|---|---|
-| `-s`, `--spotify` | Spotify playlist URL or ID | `.env` value or prompt |
-| `-y`, `--ytmusic` | YouTube Music playlist URL or ID | `.env` value or prompt |
-| `--dry-run` | Compare playlists and preview matches without modifying anything | `False` |
-| `--min-score` | Minimum match similarity threshold (0 - 100) | `70.0` |
-| `--cache` | Path to cached track matches file | `sync_cache.json` |
-| `--yt-auth` | Explicit path to YouTube Music auth file | `browser.json` / `oauth.json` |
+| Mode | Spotify Requirement | Spotify -> YouTube Music | YouTube Music -> Spotify |
+|---|---|---|---|
+| **Free Mode** (Default) | Free Account (No Premium) | 100% Automatic | Exports links to `spotify_tracks_to_add.txt` (Paste with `Ctrl+V` in Desktop) |
+| **API Mode** | Premium Developer App | 100% Automatic | 100% Automatic |
