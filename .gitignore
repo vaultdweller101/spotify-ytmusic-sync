@@ -1,0 +1,16 @@
+# Python virtual environment
+.venv/
+env/
+venv/
+__pycache__/
+*.pyc
+
+# Secrets & OAuth caches
+.env
+.spotify_token_cache
+browser.json
+oauth.json
+
+# Local runtime data
+sync_cache.json
+*.log
