@@ -13,4 +13,5 @@ oauth.json
 
 # Local runtime data
 sync_cache.json
+spotify_tracks_to_add.txt
 *.log
