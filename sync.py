@@ -1,6 +1,17 @@
 import argparse
 import os
 import sys
+import io
+
+# Force UTF-8 encoding on standard output and error to support international characters
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except AttributeError:
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+
 from dotenv import load_dotenv
 
 # Load environment variables from .env
@@ -151,10 +162,8 @@ def cmd_sync(args):
 
     try:
         yt_client = YTMusicClient(auth_file=args.yt_auth)
-        yt_client.require_auth()
     except Exception as e:
         print(f"Error initializing YouTube Music client: {e}")
-        print("Run 'python sync.py setup-ytmusic' to configure your YouTube Music credentials.")
         sys.exit(1)
 
     syncer = PlaylistSyncer(
@@ -168,6 +177,7 @@ def cmd_sync(args):
         spotify_playlist_id=sp_playlist,
         ytmusic_playlist_id=yt_playlist,
         dry_run=args.dry_run,
+        direction=getattr(args, "direction", "both"),
     )
 
     # Print summary
@@ -213,6 +223,7 @@ def main():
     sync_parser.add_argument("--min-score", type=float, default=70.0, help="Minimum fuzzy match score (0-100, default 70.0)")
     sync_parser.add_argument("--cache", default="sync_cache.json", help="Path to cache file for mapped tracks")
     sync_parser.add_argument("--yt-auth", help="Explicit path to YouTube Music auth file (oauth.json or browser.json)")
+    sync_parser.add_argument("--direction", choices=["both", "yt-to-sp", "sp-to-yt"], default="both", help="Sync direction: 'both', 'yt-to-sp', or 'sp-to-yt'")
     sync_parser.set_defaults(func=cmd_sync)
 
     # Command: test

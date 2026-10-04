@@ -22,7 +22,7 @@ class SpotifyPublicClient:
     """
     Interacts with Spotify without requiring any developer account,
     API keys, or Spotify Premium.
-    - Reads playlists using public/shareable web embeds.
+    - Reads playlists of ANY size using Spotify's public partner endpoints.
     - Resolves Spotify track URIs publicly.
     """
     def __init__(self):
@@ -36,6 +36,21 @@ class SpotifyPublicClient:
 
     def get_playlist_details(self, playlist_id: str) -> dict:
         pid = extract_spotify_playlist_id(playlist_id)
+        try:
+            import spotapi
+            pl = spotapi.PublicPlaylist(pid)
+            info = pl.get_playlist_info(limit=1)
+            content = info.get("data", {}).get("playlistV2", {}).get("content", {})
+            name = info.get("data", {}).get("playlistV2", {}).get("name", f"Spotify Playlist ({pid})")
+            return {
+                "id": pid,
+                "name": name,
+                "description": "",
+                "total_tracks": content.get("totalCount", 0),
+            }
+        except Exception:
+            pass
+
         url = f"https://open.spotify.com/embed/playlist/{pid}"
         req = urllib.request.Request(url, headers=self.headers)
         try:
@@ -62,10 +77,45 @@ class SpotifyPublicClient:
 
     def get_playlist_tracks(self, playlist_id: str) -> List[Track]:
         pid = extract_spotify_playlist_id(playlist_id)
+        tracks: List[Track] = []
+
+        # 1. Primary method: spotapi paginated extraction (handles 1,000+ tracks)
+        try:
+            import spotapi
+            pl = spotapi.PublicPlaylist(pid)
+            for batch in pl.paginate_playlist():
+                items = batch.get("items", [])
+                for it in items:
+                    data = it.get("itemV2", {}).get("data", {})
+                    name = data.get("name")
+                    if not name:
+                        continue
+                    artists = [
+                        a.get("profile", {}).get("name")
+                        for a in data.get("artists", {}).get("items", [])
+                        if a.get("profile", {}).get("name")
+                    ]
+                    uri = data.get("uri")
+                    dur_data = data.get("trackDuration", {})
+                    dur_ms = dur_data.get("totalMilliseconds") if isinstance(dur_data, dict) else None
+                    dur_sec = dur_ms // 1000 if dur_ms else None
+
+                    track = Track(
+                        title=name,
+                        artists=artists,
+                        duration_seconds=dur_sec,
+                        spotify_uri=uri,
+                        spotify_id=uri.split(":")[-1] if uri else None,
+                    )
+                    tracks.append(track)
+            if tracks:
+                return tracks
+        except Exception as e:
+            print(f"[Notice] spotapi public fetch error ({e}), trying embed parser.")
+
+        # 2. Fallback method: web embed parser (first 100 tracks)
         url = f"https://open.spotify.com/embed/playlist/{pid}"
         req = urllib.request.Request(url, headers=self.headers)
-
-        tracks: List[Track] = []
         try:
             html = urllib.request.urlopen(req, timeout=10).read().decode("utf-8")
             matches = re.findall(r'<script\s+id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
@@ -96,11 +146,62 @@ class SpotifyPublicClient:
     def search_track(self, track: Track, min_score: float = 70.0) -> Optional[Tuple[Track, float]]:
         """
         Publicly finds the Spotify track URI without official API keys.
+        Uses spotapi direct Spotify search first, then DuckDuckGo as fallback.
         """
         c_title = clean_title(track.title)
         c_artist = clean_artist(track.primary_artist)
-        query = f"site:open.spotify.com/track {c_title} {c_artist}".strip()
-        data = urllib.parse.urlencode({"q": query}).encode("utf-8")
+        query = f"{c_title} {c_artist}".strip()
+
+        # 1. Primary: spotapi direct search
+        try:
+            import spotapi
+            results = spotapi.Public.song_search(query)
+            items = next(results)
+            if isinstance(items, list):
+                best_match: Optional[Track] = None
+                best_score = 0.0
+                for it in items[:6]:
+                    d = it.get("item", {}).get("data", {})
+                    name = d.get("name")
+                    if not name:
+                        continue
+                    artists = [
+                        a.get("profile", {}).get("name")
+                        for a in d.get("artists", {}).get("items", [])
+                        if a.get("profile", {}).get("name")
+                    ]
+                    dur_data = d.get("duration", {})
+                    dur_ms = dur_data.get("totalMilliseconds") if isinstance(dur_data, dict) else None
+                    dur_sec = dur_ms // 1000 if dur_ms else None
+                    uri = d.get("uri")
+                    track_id = uri.split(":")[-1] if uri else None
+
+                    score = calculate_match_score(
+                        track.title,
+                        track.artists,
+                        track.duration_seconds,
+                        name,
+                        artists,
+                        dur_sec,
+                    )
+                    if score > best_score:
+                        best_score = score
+                        best_match = Track(
+                            title=name,
+                            artists=artists,
+                            duration_seconds=dur_sec,
+                            spotify_id=track_id,
+                            spotify_uri=uri,
+                        )
+
+                if best_match and best_score >= min_score:
+                    return best_match, best_score
+        except Exception:
+            pass
+
+        # 2. Fallback: DuckDuckGo search
+        ddg_query = f"site:open.spotify.com/track {c_title} {c_artist}".strip()
+        data = urllib.parse.urlencode({"q": ddg_query}).encode("utf-8")
         req = urllib.request.Request(
             "https://html.duckduckgo.com/html/",
             data=data,
@@ -356,7 +457,6 @@ class SpotifyClient:
             if urls_to_copy:
                 try:
                     joined_urls = "\n".join(urls_to_copy)
-                    # Use PowerShell Set-Clipboard
                     cmd = ["powershell", "-NoProfile", "-Command", "$input | Set-Clipboard"]
                     subprocess.run(cmd, input=joined_urls, text=True, check=True)
                     clipboard_copied = True
