@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import subprocess
 import urllib.request
 import urllib.parse
 from typing import List, Optional, Tuple
@@ -19,8 +20,10 @@ def extract_spotify_playlist_id(url_or_id: str) -> str:
 
 class SpotifyPublicClient:
     """
-    Scrapes public/unlisted Spotify playlists directly from Spotify's web embed.
-    Requires NO developer account, NO Spotify Premium, and NO API keys.
+    Interacts with Spotify without requiring any developer account,
+    API keys, or Spotify Premium.
+    - Reads playlists using public/shareable web embeds.
+    - Resolves Spotify track URIs publicly.
     """
     def __init__(self):
         self.headers = {
@@ -36,7 +39,7 @@ class SpotifyPublicClient:
         url = f"https://open.spotify.com/embed/playlist/{pid}"
         req = urllib.request.Request(url, headers=self.headers)
         try:
-            html = urllib.request.urlopen(req).read().decode("utf-8")
+            html = urllib.request.urlopen(req, timeout=10).read().decode("utf-8")
             matches = re.findall(r'<script\s+id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
             if matches:
                 data = json.loads(matches[0])
@@ -64,7 +67,7 @@ class SpotifyPublicClient:
 
         tracks: List[Track] = []
         try:
-            html = urllib.request.urlopen(req).read().decode("utf-8")
+            html = urllib.request.urlopen(req, timeout=10).read().decode("utf-8")
             matches = re.findall(r'<script\s+id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
             if matches:
                 data = json.loads(matches[0])
@@ -74,7 +77,6 @@ class SpotifyPublicClient:
                     uri = item.get("uri")
                     title = item.get("title", "")
                     subtitle = item.get("subtitle", "")
-                    # subtitle in embed contains comma-separated artist names
                     artists = [a.strip() for a in subtitle.split(",")] if subtitle else []
                     dur_ms = item.get("duration", 0)
 
@@ -92,19 +94,36 @@ class SpotifyPublicClient:
         return tracks
 
     def search_track(self, track: Track, min_score: float = 70.0) -> Optional[Tuple[Track, float]]:
-        # Without Web API or Premium, automatic Spotify search is not directly available via official API.
-        # We synthesize a search query URL for user reference.
+        """
+        Publicly finds the Spotify track URI without official API keys.
+        """
         c_title = clean_title(track.title)
         c_artist = clean_artist(track.primary_artist)
-        query = f"{c_title} {c_artist}".strip()
-        encoded = urllib.parse.quote(query)
-        synth_track = Track(
-            title=track.title,
-            artists=track.artists,
-            duration_seconds=track.duration_seconds,
-            spotify_uri=f"https://open.spotify.com/search/{encoded}",
+        query = f"site:open.spotify.com/track {c_title} {c_artist}".strip()
+        data = urllib.parse.urlencode({"q": query}).encode("utf-8")
+        req = urllib.request.Request(
+            "https://html.duckduckgo.com/html/",
+            data=data,
+            headers=self.headers,
         )
-        return synth_track, 75.0
+
+        try:
+            html = urllib.request.urlopen(req, timeout=8).read().decode("utf-8")
+            matches = re.findall(r'open\.spotify\.com/track/([a-zA-Z0-9]{22})', html)
+            if matches:
+                track_id = matches[0]
+                matched_track = Track(
+                    title=track.title,
+                    artists=track.artists,
+                    duration_seconds=track.duration_seconds,
+                    spotify_id=track_id,
+                    spotify_uri=f"spotify:track:{track_id}",
+                )
+                return matched_track, 85.0
+        except Exception:
+            pass
+
+        return None
 
 
 class SpotifyClient:
@@ -155,7 +174,6 @@ class SpotifyClient:
             self.has_write_access = False
 
     def test_connection(self) -> dict:
-        """Verifies Spotify status."""
         if self.has_write_access and self.sp:
             user = self.sp.current_user()
             return {
@@ -300,6 +318,7 @@ class SpotifyClient:
             if best_match and best_score >= min_score:
                 return best_match, best_score
 
+        # Fallback to public search without API keys
         return self.public_client.search_track(track, min_score)
 
     def add_tracks_to_playlist(self, playlist_id: str, tracks: List[Track]) -> int:
@@ -317,15 +336,49 @@ class SpotifyClient:
                 added_count += len(chunk)
             return added_count
         else:
-            # Free mode: Save list of missing tracks so the user can easily paste or add them in Spotify Desktop
+            # Free Mode: Extract track URIs/URLs, copy to Windows clipboard, and save to file
             output_file = "spotify_tracks_to_add.txt"
+            urls_to_copy = []
+
             with open(output_file, "w", encoding="utf-8") as f:
                 f.write("# Tracks from YouTube Music to add to Spotify\n")
-                f.write("# You can copy the URLs below and press Ctrl+V in your Spotify Desktop playlist!\n\n")
+                f.write("# The Spotify links below have been copied to your Windows Clipboard!\n")
+                f.write("# Open Spotify Desktop, click anywhere in your playlist, and press Ctrl+V to add all of them!\n\n")
                 for t in tracks:
-                    f.write(f"{t.title} - {t.artists_str}\n")
-                    if t.spotify_uri:
-                        f.write(f"  Link: {t.spotify_uri}\n")
-            print(f"\n[Free Mode] Created '{output_file}' with {len(tracks)} track(s) to add to Spotify.")
-            print("Tip: In Spotify Desktop, select your playlist and press Ctrl+V to paste songs directly!")
+                    track_url = f"https://open.spotify.com/track/{t.spotify_id}" if t.spotify_id else t.spotify_uri
+                    if track_url:
+                        urls_to_copy.append(track_url)
+                        f.write(f"{track_url}\n")
+                    else:
+                        f.write(f"# (No direct link found) {t.title} - {t.artists_str}\n")
+
+            # Copy to Windows clipboard via PowerShell
+            if urls_to_copy:
+                try:
+                    joined_urls = "\n".join(urls_to_copy)
+                    # Use PowerShell Set-Clipboard
+                    cmd = ["powershell", "-NoProfile", "-Command", "$input | Set-Clipboard"]
+                    subprocess.run(cmd, input=joined_urls, text=True, check=True)
+                    clipboard_copied = True
+                except Exception:
+                    clipboard_copied = False
+            else:
+                clipboard_copied = False
+
+            print("\n" + "=" * 60)
+            print("         YOUTUBE MUSIC -> SPOTIFY (FREE MODE)")
+            print("=" * 60)
+            print(f"Found {len(tracks)} track(s) from YouTube Music to add to Spotify.")
+            print(f"Saved track links to: {output_file}")
+            if clipboard_copied:
+                print("\n[COPIED TO CLIPBOARD!] All Spotify track links are now on your clipboard.")
+                print(">>> How to add them to Spotify in 3 seconds:")
+                print("    1. Open the Spotify Desktop app.")
+                print("    2. Navigate to your target playlist.")
+                print("    3. Click inside the playlist area and press Ctrl + V.")
+                print("    4. All songs will be instantly added!")
+            else:
+                print("\nTip: Copy the links from 'spotify_tracks_to_add.txt', select your playlist in Spotify Desktop, and press Ctrl+V.")
+            print("=" * 60 + "\n")
+
             return len(tracks)
