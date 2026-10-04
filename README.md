@@ -14,13 +14,20 @@ A Python tool that synchronizes playlists between **Spotify** and **YouTube Musi
 
 ## 1. Quick Start
 
-The virtual environment and dependencies are already set up in:
-`C:\Users\dngo123\spotify-ytmusic-sync\.venv`
+Clone the repository and set up a virtual environment:
 
-To activate the environment in PowerShell:
 ```powershell
-cd C:\Users\dngo123\spotify-ytmusic-sync
-.\.venv\Scripts\Activate.ps1
+# Clone the repository
+git clone https://github.com/vaultdweller101/spotify-ytmusic-sync.git
+cd spotify-ytmusic-sync
+
+# Create and activate virtual environment
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1    # Windows
+# source .venv/bin/activate     # macOS/Linux
+
+# Install dependencies
+pip install -r requirements.txt
 ```
 
 ---
